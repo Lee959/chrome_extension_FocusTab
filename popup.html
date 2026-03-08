@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>FocusTab</h1>
+      <label class="toggle">
+        <input type="checkbox" id="enableToggle" checked>
+        <span class="slider"></span>
+      </label>
+    </div>
+    <p class="subtitle">One tab per site. Stay focused.</p>
+
+    <div class="add-domain">
+      <input type="text" id="domainInput" placeholder="e.g. chatgpt.com">
+      <button id="addBtn">Add</button>
+    </div>
+    <p id="domainPreview" class="domain-preview"></p>
+    <div id="presets" class="presets"></div>
+
+    <ul id="domainList"></ul>
+
+    <p id="emptyMsg" class="empty-msg">No sites restricted yet. Add one above.</p>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
