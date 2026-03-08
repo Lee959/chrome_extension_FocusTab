@@ -1,6 +1,8 @@
 // FocusTab - Background Service Worker
 // Monitors tab events, closes duplicate tabs, and tracks browsing time
 
+importScripts('crypto-utils.js');
+
 const COOLDOWN_MS = 15 * 60 * 1000; // 15 minutes
 const RETENTION_DAYS = 90;
 
@@ -117,29 +119,40 @@ function isTrackableUrl(url) {
   // This excludes: chrome://, chrome-extension://, about:, edge://, file://
 }
 
-async function saveTimeForPrevious() {
-  if (!activeHostname || !activeStartTime) return;
+// Serialize all saves to prevent read-modify-write races on timeline array
+let saveChain = Promise.resolve();
 
+function saveTimeForPrevious() {
+  if (!activeHostname || !activeStartTime) return Promise.resolve();
+
+  // Capture values locally before any async work
+  const hostname = activeHostname;
+  const startTime = activeStartTime;
   const now = Date.now();
-  const elapsed = now - activeStartTime;
-  if (elapsed < 1000) return; // ignore < 1 second
+  const elapsed = now - startTime;
+  if (elapsed < 1000) return Promise.resolve();
 
-  const domain = stripWww(activeHostname);
-  const dateKey = getDateKey(activeStartTime);
-  const trackingKey = 'tracking_' + dateKey;
-  const timelineKey = 'timeline_' + dateKey;
+  // Chain saves so each reads storage AFTER the previous write completes
+  saveChain = saveChain.then(async () => {
+    const domain = stripWww(hostname);
+    const dateKey = getDateKey(startTime);
+    const trackingKey = 'tracking_' + dateKey;
+    const timelineKey = 'timeline_' + dateKey;
 
-  const data = await chrome.storage.local.get([trackingKey, timelineKey]);
-  const tracking = data[trackingKey] || {};
-  const timeline = data[timelineKey] || [];
+    const data = await chrome.storage.local.get([trackingKey, timelineKey]);
+    const tracking = data[trackingKey] || {};
+    const timeline = data[timelineKey] || [];
 
-  tracking[domain] = (tracking[domain] || 0) + elapsed;
-  timeline.push({ domain, start: activeStartTime, end: now });
+    tracking[domain] = (tracking[domain] || 0) + elapsed;
+    timeline.push({ domain, start: startTime, end: now });
 
-  await chrome.storage.local.set({
-    [trackingKey]: tracking,
-    [timelineKey]: timeline
-  });
+    await chrome.storage.local.set({
+      [trackingKey]: tracking,
+      [timelineKey]: timeline
+    });
+  }).catch(err => console.error('[FocusTab] Save error:', err));
+
+  return saveChain;
 }
 
 async function startTracking(hostname) {
@@ -218,9 +231,9 @@ chrome.idle.onStateChanged.addListener(async (state) => {
 });
 
 // Periodic save to avoid data loss if service worker dies
-setInterval(() => {
+setInterval(async () => {
   if (activeHostname && activeStartTime) {
-    saveTimeForPrevious();
+    await saveTimeForPrevious();
     activeStartTime = Date.now();
   }
 }, 60 * 1000);
@@ -261,9 +274,30 @@ function getAllTrackingData(allData) {
   return trackingData;
 }
 
+const TRACKING_KEY_RE = /^tracking_\d{4}-\d{2}-\d{2}$/;
+const MAX_DAILY_MS = 24 * 60 * 60 * 1000; // 24 hours
+
+function isValidTrackingValue(obj) {
+  if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return false;
+  return Object.entries(obj).every(([k, v]) =>
+    typeof k === 'string' && typeof v === 'number' && v >= 0 && v <= MAX_DAILY_MS
+  );
+}
+
+function sanitizeRemoteData(data) {
+  const safe = {};
+  for (const [key, value] of Object.entries(data)) {
+    if (TRACKING_KEY_RE.test(key) && isValidTrackingValue(value)) {
+      safe[key] = value;
+    }
+  }
+  return safe;
+}
+
 function mergeTrackingData(local, remote) {
+  const safeRemote = sanitizeRemoteData(remote);
   const merged = { ...local };
-  for (const [key, remoteDomains] of Object.entries(remote)) {
+  for (const [key, remoteDomains] of Object.entries(safeRemote)) {
     if (!merged[key]) {
       merged[key] = remoteDomains;
     } else {
@@ -275,9 +309,21 @@ function mergeTrackingData(local, remote) {
   return merged;
 }
 
+function checkTokenScopes(res) {
+  const scopeHeader = res.headers.get('X-OAuth-Scopes');
+  if (scopeHeader === null) return; // header not present
+  const scopes = scopeHeader.split(',').map(s => s.trim()).filter(Boolean);
+  const excess = scopes.filter(s => s !== 'gist');
+  if (excess.length > 0) {
+    chrome.storage.local.set({ tokenScopeWarning: excess.join(', ') });
+  } else {
+    chrome.storage.local.remove('tokenScopeWarning');
+  }
+}
+
 async function syncData() {
-  const settings = await chrome.storage.local.get(['githubToken', 'gistId', 'deviceName']);
-  const token = settings.githubToken;
+  const settings = await chrome.storage.local.get(['githubTokenEncrypted', 'gistId', 'deviceName']);
+  const token = await decryptToken(settings.githubTokenEncrypted);
   const deviceName = settings.deviceName || 'Default';
 
   if (!token) return { success: false, error: 'No GitHub token configured.' };
@@ -298,6 +344,7 @@ async function syncData() {
         headers: { 'Authorization': 'token ' + token }
       });
       if (!getRes.ok) return { success: false, error: 'Failed to fetch gist: ' + getRes.status };
+      checkTokenScopes(getRes);
 
       const gist = await getRes.json();
       const remoteContent = gist.files['focustab_data.json'];
@@ -324,11 +371,11 @@ async function syncData() {
       const knownDevices = [];
       for (const [device, deviceData] of Object.entries(remoteAll)) {
         if (device === deviceName) continue;
+        if (typeof device !== 'string' || device.length > 100) continue;
         knownDevices.push(device);
-        for (const [key, value] of Object.entries(deviceData)) {
-          if (key.startsWith('tracking_')) {
-            toStore['remote_' + device + '_' + key] = value;
-          }
+        const safeDeviceData = sanitizeRemoteData(deviceData);
+        for (const [key, value] of Object.entries(safeDeviceData)) {
+          toStore['remote_' + device + '_' + key] = value;
         }
       }
       toStore.knownDevices = knownDevices;
@@ -358,6 +405,7 @@ async function syncData() {
         })
       });
       if (!createRes.ok) return { success: false, error: 'Failed to create gist: ' + createRes.status };
+      checkTokenScopes(createRes);
 
       const newGist = await createRes.json();
       await chrome.storage.local.set({ gistId: newGist.id });
@@ -370,8 +418,8 @@ async function syncData() {
 }
 
 async function autoSync() {
-  const settings = await chrome.storage.local.get(['githubToken', 'gistId']);
-  if (settings.githubToken && settings.gistId) {
+  const settings = await chrome.storage.local.get(['githubTokenEncrypted', 'gistId']);
+  if (settings.githubTokenEncrypted && settings.gistId) {
     await syncData();
   }
 }
@@ -390,8 +438,18 @@ setInterval(autoSync, AUTO_SYNC_INTERVAL);
 
 // ==================== Startup ====================
 
+async function migrateToken() {
+  const data = await chrome.storage.local.get(['githubToken', 'githubTokenEncrypted']);
+  if (data.githubToken && typeof data.githubToken === 'string' && !data.githubTokenEncrypted) {
+    const encrypted = await encryptToken(data.githubToken);
+    await chrome.storage.local.set({ githubTokenEncrypted: encrypted });
+    await chrome.storage.local.remove('githubToken');
+  }
+}
+
 async function init() {
   await loadSettings();
+  await migrateToken();
   await cleanOldData();
 
   // Start tracking the current active tab

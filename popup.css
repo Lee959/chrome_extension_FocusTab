@@ -310,3 +310,15 @@ h1 {
   border-color: #4CAF50;
   color: #fff;
 }
+
+/* Scope warning banner */
+.scope-warning {
+  background: #5c3a0a;
+  color: #ffd080;
+  font-size: 11px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  margin-bottom: 10px;
+  border: 1px solid #a06000;
+  line-height: 1.4;
+}

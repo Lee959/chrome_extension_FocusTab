@@ -32,9 +32,12 @@ tokenLink.addEventListener('click', (e) => {
 
 // Load saved settings
 async function loadSettings() {
-  const data = await chrome.storage.local.get(['githubToken', 'gistId', 'deviceName']);
+  const data = await chrome.storage.local.get(['githubTokenEncrypted', 'gistId', 'deviceName']);
   if (data.deviceName) deviceNameInput.value = data.deviceName;
-  if (data.githubToken) tokenInput.value = data.githubToken;
+  if (data.githubTokenEncrypted) {
+    const token = await decryptToken(data.githubTokenEncrypted);
+    if (token) tokenInput.value = token;
+  }
   if (data.gistId) gistIdInput.value = data.gistId;
 }
 
@@ -66,11 +69,20 @@ saveBtn.addEventListener('click', async () => {
   const token = tokenInput.value.trim();
   const gistId = gistIdInput.value.trim();
 
-  await chrome.storage.local.set({
+  const toStore = {
     deviceName: deviceName || '',
-    githubToken: token,
     gistId: gistId || ''
-  });
+  };
+
+  if (token) {
+    toStore.githubTokenEncrypted = await encryptToken(token);
+  } else {
+    toStore.githubTokenEncrypted = null;
+  }
+
+  await chrome.storage.local.set(toStore);
+  // Clean up any legacy plaintext token
+  await chrome.storage.local.remove('githubToken');
 
   status.textContent = 'Saved!';
   status.style.color = '#4CAF50';
@@ -99,6 +111,20 @@ verifyBtn.addEventListener('click', async () => {
       const user = await res.json();
       verifyResult.textContent = 'Connected as ' + user.login;
       verifyResult.style.color = '#4CAF50';
+
+      // Check token scopes
+      const scopeHeader = res.headers.get('X-OAuth-Scopes');
+      if (scopeHeader !== null) {
+        const scopes = scopeHeader.split(',').map(s => s.trim()).filter(Boolean);
+        const excess = scopes.filter(s => s !== 'gist');
+        if (excess.length > 0) {
+          verifyResult.textContent += '\nWarning: Token has excess permissions: ' + excess.join(', ') + '. Only "gist" is needed.';
+          verifyResult.style.whiteSpace = 'pre-line';
+          chrome.storage.local.set({ tokenScopeWarning: excess.join(', ') });
+        } else {
+          chrome.storage.local.remove('tokenScopeWarning');
+        }
+      }
     } else if (res.status === 401) {
       verifyResult.textContent = 'Invalid token. Please check and try again.';
       verifyResult.style.color = '#e74c3c';

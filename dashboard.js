@@ -65,7 +65,7 @@ async function saveHiddenDomains() {
 }
 
 function isHidden(domain) {
-  return hiddenDomains.some(h => domain === h || domain.includes(h));
+  return hiddenDomains.some(h => domain === h || domain.endsWith('.' + h));
 }
 
 function filterTracking(tracking) {
@@ -317,34 +317,15 @@ function renderHiddenDomains() {
 
 function renderTimeline(timeline) {
   const container = document.getElementById('timeline');
-  while (container.firstChild) {
-    container.removeChild(container.firstChild);
-  }
+  while (container.firstChild) container.removeChild(container.firstChild);
 
-  if (timeline.length === 0) return;
+  // Filter out invalid entries defensively
+  const valid = timeline.filter(e =>
+    typeof e.start === 'number' && typeof e.end === 'number' &&
+    e.start > 0 && e.end > e.start
+  );
 
-  // DEBUG: log timeline data
-  console.log('[Timeline DEBUG] entries:', timeline.length);
-  timeline.forEach((e, i) => {
-    console.log(`[Timeline DEBUG] #${i}: domain=${e.domain}, start=${e.start}, end=${e.end}, duration=${e.end - e.start}ms, startType=${typeof e.start}, endType=${typeof e.end}`);
-  });
-
-  // Build list of unique domains for consistent coloring
-  const domainSet = [];
-  timeline.forEach(entry => {
-    if (!domainSet.includes(entry.domain)) {
-      domainSet.push(entry.domain);
-    }
-  });
-
-  // Find the day's time range
-  const dayStart = new Date(timeline[0].start);
-  dayStart.setHours(0, 0, 0, 0);
-  const dayEnd = new Date(dayStart);
-  dayEnd.setHours(23, 59, 59, 999);
-  const dayMs = dayEnd.getTime() - dayStart.getTime();
-
-  // Hour labels
+  // Always show hour labels
   const hours = document.createElement('div');
   hours.className = 'timeline-hours';
   for (let h = 0; h <= 24; h += 3) {
@@ -354,7 +335,11 @@ function renderTimeline(timeline) {
   }
   container.appendChild(hours);
 
-  // Timeline bar
+  // Always show timeline bar (even when empty)
+  const dayStart = new Date();
+  dayStart.setHours(0, 0, 0, 0);
+  const dayMs = 24 * 60 * 60 * 1000;
+
   const bar = document.createElement('div');
   bar.className = 'timeline-bar';
 
@@ -362,24 +347,44 @@ function renderTimeline(timeline) {
   tooltip.className = 'timeline-tooltip';
   bar.appendChild(tooltip);
 
-  console.log('[Timeline DEBUG] dayStart:', dayStart.getTime(), 'dayMs:', dayMs);
+  if (valid.length === 0) {
+    container.appendChild(bar);
+    const hint = document.createElement('div');
+    hint.className = 'timeline-hint';
+    hint.textContent = 'No timeline data yet — browse some sites for 30+ seconds.';
+    container.appendChild(hint);
+    return;
+  }
 
-  timeline.forEach((entry, idx) => {
+  // Use first entry's date for dayStart (in case viewing a past day)
+  dayStart.setTime(valid[0].start);
+  dayStart.setHours(0, 0, 0, 0);
+
+  // Build domain list for colors
+  const domainSet = [];
+  valid.forEach(e => {
+    if (!domainSet.includes(e.domain)) domainSet.push(e.domain);
+  });
+
+  // Render blocks
+  valid.forEach(entry => {
     const startOffset = entry.start - dayStart.getTime();
     const duration = entry.end - entry.start;
     const leftPct = (startOffset / dayMs) * 100;
     const widthPct = Math.max((duration / dayMs) * 100, 0.4);
 
-    console.log(`[Timeline DEBUG] block#${idx}: left=${leftPct.toFixed(2)}%, width=${widthPct.toFixed(4)}%, bg=${getDomainColor(entry.domain, domainSet)}`);
+    // Skip blocks that would render outside the visible bar
+    if (leftPct < -5 || leftPct > 105) return;
 
     const block = document.createElement('div');
     block.className = 'timeline-block';
-    block.style.left = leftPct + '%';
-    block.style.width = widthPct + '%';
+    block.style.left = Math.max(0, leftPct) + '%';
+    block.style.width = Math.min(widthPct, 100 - Math.max(0, leftPct)) + '%';
     block.style.background = getDomainColor(entry.domain, domainSet);
 
-    block.addEventListener('mouseenter', (e) => {
-      tooltip.textContent = entry.domain + '  ' + formatTime(entry.start) + ' - ' + formatTime(entry.end) + '  (' + formatDuration(duration) + ')';
+    block.addEventListener('mouseenter', () => {
+      tooltip.textContent = entry.domain + '  ' + formatTime(entry.start) +
+        ' - ' + formatTime(entry.end) + '  (' + formatDuration(duration) + ')';
       tooltip.style.display = 'block';
       tooltip.style.left = block.style.left;
     });
@@ -442,7 +447,8 @@ async function renderView(date) {
   }
 
   const filteredTracking = filterTracking(tracking);
-  const filteredTimeline = filterTimeline(timeline).filter(e => (e.end - e.start) >= TIMELINE_MIN_DURATION);
+  const filteredTimeline = filterTimeline(timeline)
+    .filter(e => (e.end - e.start) >= TIMELINE_MIN_DURATION);
 
   renderStats(tracking, filteredTracking);
   renderBarChart(filteredTracking);
@@ -555,10 +561,24 @@ syncBtn.addEventListener('click', async () => {
   } else {
     showSyncStatus(result.error || 'Sync failed', true);
   }
+  checkScopeWarning();
 
   syncBtn.disabled = false;
   syncBtn.textContent = 'Sync';
 });
 
+// Show scope warning if token has excess permissions
+async function checkScopeWarning() {
+  const data = await chrome.storage.local.get('tokenScopeWarning');
+  const el = document.getElementById('scopeWarning');
+  if (data.tokenScopeWarning) {
+    el.textContent = 'Warning: Your GitHub token has excess permissions: ' + data.tokenScopeWarning + '. Only "gist" scope is needed. Go to Settings to recreate it.';
+    el.style.display = 'block';
+  } else {
+    el.style.display = 'none';
+  }
+}
+
 // Initial render
 populateDeviceFilter().then(() => renderView(currentDate));
+checkScopeWarning();

@@ -428,3 +428,22 @@ h2 {
   height: 10px;
   border-radius: 2px;
 }
+
+.timeline-hint {
+  text-align: center;
+  color: #555;
+  font-size: 12px;
+  padding: 8px 0;
+}
+
+/* Scope warning banner */
+.scope-warning {
+  background: #5c3a0a;
+  color: #ffd080;
+  font-size: 13px;
+  padding: 10px 14px;
+  border-radius: 8px;
+  margin-bottom: 16px;
+  border: 1px solid #a06000;
+  line-height: 1.5;
+}

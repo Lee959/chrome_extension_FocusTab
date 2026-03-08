@@ -311,5 +311,18 @@ document.getElementById('dashboardBtn').addEventListener('click', async () => {
   }
 });
 
+// Show scope warning if token has excess permissions
+async function checkScopeWarning() {
+  const data = await chrome.storage.local.get('tokenScopeWarning');
+  const el = document.getElementById('scopeWarning');
+  if (data.tokenScopeWarning) {
+    el.textContent = 'Your GitHub token has excess permissions: ' + data.tokenScopeWarning + '. Only "gist" is needed. Recreate it with gist-only scope.';
+    el.style.display = 'block';
+  } else {
+    el.style.display = 'none';
+  }
+}
+
 // Load on popup open
 loadSettings();
+checkScopeWarning();
