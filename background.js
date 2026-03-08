@@ -247,6 +247,147 @@ async function cleanOldData() {
   }
 }
 
+// ==================== Sync ====================
+
+const AUTO_SYNC_INTERVAL = 30 * 60 * 1000; // 30 minutes
+
+function getAllTrackingData(allData) {
+  const trackingData = {};
+  for (const [key, value] of Object.entries(allData)) {
+    if (key.startsWith('tracking_')) {
+      trackingData[key] = value;
+    }
+  }
+  return trackingData;
+}
+
+function mergeTrackingData(local, remote) {
+  const merged = { ...local };
+  for (const [key, remoteDomains] of Object.entries(remote)) {
+    if (!merged[key]) {
+      merged[key] = remoteDomains;
+    } else {
+      for (const [domain, ms] of Object.entries(remoteDomains)) {
+        merged[key][domain] = Math.max(merged[key][domain] || 0, ms);
+      }
+    }
+  }
+  return merged;
+}
+
+async function syncData() {
+  const settings = await chrome.storage.local.get(['githubToken', 'gistId', 'deviceName']);
+  const token = settings.githubToken;
+  const deviceName = settings.deviceName || 'Default';
+
+  if (!token) return { success: false, error: 'No GitHub token configured.' };
+
+  try {
+    const allData = await chrome.storage.local.get(null);
+    const localData = getAllTrackingData(allData);
+    let gistId = settings.gistId;
+
+    if (gistId) {
+      // Validate gist ID format (must be hex string)
+      if (!/^[a-f0-9]+$/i.test(gistId)) {
+        return { success: false, error: 'Invalid Gist ID format.' };
+      }
+
+      // Download remote data
+      const getRes = await fetch('https://api.github.com/gists/' + gistId, {
+        headers: { 'Authorization': 'token ' + token }
+      });
+      if (!getRes.ok) return { success: false, error: 'Failed to fetch gist: ' + getRes.status };
+
+      const gist = await getRes.json();
+      const remoteContent = gist.files['focustab_data.json'];
+      let remoteAll = remoteContent ? JSON.parse(remoteContent.content) : {};
+
+      // Backward compat: migrate flat format to device-namespaced
+      const isFlat = Object.keys(remoteAll).some(k => k.startsWith('tracking_'));
+      if (isFlat) {
+        remoteAll = { [deviceName]: remoteAll };
+      }
+
+      // Merge this device's data
+      const remoteDeviceData = remoteAll[deviceName] || {};
+      const merged = mergeTrackingData(localData, remoteDeviceData);
+
+      // Save merged data locally
+      await chrome.storage.local.set(merged);
+
+      // Store other devices' data locally for dashboard filtering
+      const toStore = {};
+      const oldRemoteKeys = Object.keys(allData).filter(k => k.startsWith('remote_'));
+      if (oldRemoteKeys.length > 0) await chrome.storage.local.remove(oldRemoteKeys);
+
+      const knownDevices = [];
+      for (const [device, deviceData] of Object.entries(remoteAll)) {
+        if (device === deviceName) continue;
+        knownDevices.push(device);
+        for (const [key, value] of Object.entries(deviceData)) {
+          if (key.startsWith('tracking_')) {
+            toStore['remote_' + device + '_' + key] = value;
+          }
+        }
+      }
+      toStore.knownDevices = knownDevices;
+      await chrome.storage.local.set(toStore);
+
+      // Upload: update this device's data in the gist
+      remoteAll[deviceName] = merged;
+      const updateRes = await fetch('https://api.github.com/gists/' + gistId, {
+        method: 'PATCH',
+        headers: { 'Authorization': 'token ' + token, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          files: { 'focustab_data.json': { content: JSON.stringify(remoteAll) } }
+        })
+      });
+      if (!updateRes.ok) return { success: false, error: 'Failed to update gist: ' + updateRes.status };
+
+    } else {
+      // Create new gist with device-namespaced format
+      const gistData = { [deviceName]: localData };
+      const createRes = await fetch('https://api.github.com/gists', {
+        method: 'POST',
+        headers: { 'Authorization': 'token ' + token, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          description: 'FocusTab Sync Data',
+          public: false,
+          files: { 'focustab_data.json': { content: JSON.stringify(gistData) } }
+        })
+      });
+      if (!createRes.ok) return { success: false, error: 'Failed to create gist: ' + createRes.status };
+
+      const newGist = await createRes.json();
+      await chrome.storage.local.set({ gistId: newGist.id });
+    }
+
+    return { success: true };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+}
+
+async function autoSync() {
+  const settings = await chrome.storage.local.get(['githubToken', 'gistId']);
+  if (settings.githubToken && settings.gistId) {
+    await syncData();
+  }
+}
+
+// Message handler for dashboard/popup to trigger sync
+chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  if (sender.id !== chrome.runtime.id) return;
+  if (msg.action === 'sync') {
+    syncData().then(sendResponse);
+    return true; // async response
+  }
+});
+
+// Auto-sync on timer
+setInterval(autoSync, AUTO_SYNC_INTERVAL);
+
 // ==================== Startup ====================
 
 async function init() {
@@ -263,6 +404,9 @@ async function init() {
   } catch {
     // ignore
   }
+
+  // Auto-sync on startup
+  autoSync();
 }
 
 init();

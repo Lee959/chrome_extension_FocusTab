@@ -13,10 +13,20 @@
         <div class="date-nav">
           <button id="prevDay">&lt;</button>
           <input type="date" id="datePicker">
+          <span id="dateRangeLabel" class="date-range-label"></span>
           <button id="nextDay">&gt;</button>
           <button id="todayBtn">Today</button>
+          <div class="view-toggle">
+            <button class="view-btn active" data-view="day">Day</button>
+            <button class="view-btn" data-view="week">Week</button>
+            <button class="view-btn" data-view="month">Month</button>
+          </div>
         </div>
         <div class="sync-actions">
+          <select id="deviceFilter" class="device-filter">
+            <option value="local">This Device</option>
+            <option value="all">All Devices</option>
+          </select>
           <button id="syncBtn" class="sync-btn">Sync</button>
           <button id="settingsBtn" class="settings-btn">Settings</button>
           <span id="syncStatus" class="sync-status"></span>
@@ -43,9 +53,10 @@
       <h2>Time by Site</h2>
       <div id="barChart" class="bar-chart"></div>
       <p id="noData" class="no-data" style="display:none">No browsing data for this day.</p>
+      <div id="hiddenDomains" class="hidden-domains"></div>
     </div>
 
-    <div class="section">
+    <div class="section" id="timelineSection">
       <h2>Timeline</h2>
       <div id="timeline" class="timeline"></div>
     </div>

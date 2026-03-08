@@ -7,11 +7,17 @@
 </head>
 <body>
   <div class="container">
+    <button id="backBtn" class="back-btn">&larr; Back to Dashboard</button>
     <h1>FocusTab Settings</h1>
 
     <div class="section">
       <h2>GitHub Gist Sync</h2>
       <p class="desc">Sync your tracking data between computers using a private GitHub Gist.</p>
+
+      <div class="field">
+        <label>Device Name</label>
+        <input type="text" id="deviceNameInput" placeholder="e.g. Work Laptop, Home Desktop">
+      </div>
 
       <div class="steps">
         <p class="step">1. Go to <a id="tokenLink" href="#">GitHub Token Settings</a> and create a token with only the <strong>gist</strong> scope.</p>
@@ -28,13 +34,18 @@
 
       <div class="field">
         <label>Gist ID <span class="optional">(auto-created on first sync, or paste from another computer)</span></label>
-        <input type="text" id="gistIdInput" placeholder="Auto-generated on first sync">
+        <div class="input-row">
+          <input type="password" id="gistIdInput" placeholder="Auto-generated on first sync">
+          <button id="toggleGistId">Show</button>
+        </div>
       </div>
 
       <div class="actions">
         <button id="saveBtn" class="primary">Save</button>
+        <button id="verifyBtn" class="verify-btn">Test Connection</button>
         <span id="status" class="status"></span>
       </div>
+      <div id="verifyResult" class="verify-result"></div>
     </div>
   </div>
 

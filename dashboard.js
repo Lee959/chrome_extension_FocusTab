@@ -10,8 +10,12 @@ const datePicker = document.getElementById('datePicker');
 const prevDayBtn = document.getElementById('prevDay');
 const nextDayBtn = document.getElementById('nextDay');
 const todayBtn = document.getElementById('todayBtn');
+const deviceFilter = document.getElementById('deviceFilter');
+const dateRangeLabel = document.getElementById('dateRangeLabel');
+const timelineSection = document.getElementById('timelineSection');
 
 let currentDate = new Date();
+let viewMode = 'day';
 
 function formatDateKey(date) {
   const year = date.getFullYear();
@@ -42,35 +46,151 @@ function getDomainColor(domain, domainList) {
   return COLORS[idx % COLORS.length];
 }
 
-async function loadDayData(dateKey) {
-  const trackingKey = 'tracking_' + dateKey;
-  const timelineKey = 'timeline_' + dateKey;
-  const data = await chrome.storage.local.get([trackingKey, timelineKey]);
-  return {
-    tracking: data[trackingKey] || {},
-    timeline: data[timelineKey] || []
-  };
+const TIMELINE_MIN_DURATION = 30 * 1000; // hide entries shorter than 30s from timeline
+const DEFAULT_HIDDEN = ['newtab', 'mnjncmkflhcjaajjfhahdilkkmaaaida'];
+let hiddenDomains = [];
+
+async function loadHiddenDomains() {
+  const data = await chrome.storage.local.get('hiddenDomains');
+  if (data.hiddenDomains) {
+    hiddenDomains = data.hiddenDomains;
+  } else {
+    hiddenDomains = [...DEFAULT_HIDDEN];
+    await chrome.storage.local.set({ hiddenDomains });
+  }
 }
 
-function renderStats(tracking) {
+async function saveHiddenDomains() {
+  await chrome.storage.local.set({ hiddenDomains });
+}
+
+function isHidden(domain) {
+  return hiddenDomains.some(h => domain === h || domain.includes(h));
+}
+
+function filterTracking(tracking) {
+  const filtered = {};
+  for (const [domain, ms] of Object.entries(tracking)) {
+    if (isHidden(domain)) continue;
+    filtered[domain] = ms;
+  }
+  return filtered;
+}
+
+function filterTimeline(timeline) {
+  return timeline.filter(entry => !isHidden(entry.domain));
+}
+
+async function loadDayData(dateKey) {
+  const filter = deviceFilter.value;
+  const trackingKey = 'tracking_' + dateKey;
+  const timelineKey = 'timeline_' + dateKey;
+
+  if (filter === 'local') {
+    // This device only
+    const data = await chrome.storage.local.get([trackingKey, timelineKey]);
+    return { tracking: data[trackingKey] || {}, timeline: data[timelineKey] || [] };
+  }
+
+  if (filter.startsWith('remote_')) {
+    // Specific remote device
+    const device = filter.slice(7);
+    const remoteKey = 'remote_' + device + '_' + trackingKey;
+    const data = await chrome.storage.local.get([remoteKey]);
+    return { tracking: data[remoteKey] || {}, timeline: [] };
+  }
+
+  // "all" — merge local + all remote devices
+  const allData = await chrome.storage.local.get(null);
+  const merged = { ...(allData[trackingKey] || {}) };
+  const knownDevices = allData.knownDevices || [];
+
+  for (const device of knownDevices) {
+    const remoteData = allData['remote_' + device + '_' + trackingKey] || {};
+    for (const [domain, ms] of Object.entries(remoteData)) {
+      merged[domain] = (merged[domain] || 0) + ms;
+    }
+  }
+
+  return { tracking: merged, timeline: allData[timelineKey] || [] };
+}
+
+function getDateRange(date, mode) {
+  if (mode === 'day') {
+    return [formatDateKey(date)];
+  }
+  if (mode === 'week') {
+    const d = new Date(date);
+    const dayOfWeek = d.getDay();
+    // Monday = start of week (getDay: 0=Sun, 1=Mon, ...)
+    const mondayOffset = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
+    const monday = new Date(d);
+    monday.setDate(d.getDate() + mondayOffset);
+    const keys = [];
+    for (let i = 0; i < 7; i++) {
+      const day = new Date(monday);
+      day.setDate(monday.getDate() + i);
+      keys.push(formatDateKey(day));
+    }
+    return keys;
+  }
+  // month
+  const year = date.getFullYear();
+  const month = date.getMonth();
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const keys = [];
+  for (let i = 1; i <= daysInMonth; i++) {
+    keys.push(formatDateKey(new Date(year, month, i)));
+  }
+  return keys;
+}
+
+function formatRangeLabel(dateKeys, mode) {
+  if (mode === 'day') return '';
+  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+                   'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const fullMonths = ['January', 'February', 'March', 'April', 'May', 'June',
+                      'July', 'August', 'September', 'October', 'November', 'December'];
+  if (mode === 'week') {
+    const start = new Date(dateKeys[0] + 'T00:00:00');
+    const end = new Date(dateKeys[6] + 'T00:00:00');
+    return months[start.getMonth()] + ' ' + start.getDate() + ' – ' +
+           months[end.getMonth()] + ' ' + end.getDate();
+  }
+  // month
+  const d = new Date(dateKeys[0] + 'T00:00:00');
+  return fullMonths[d.getMonth()] + ' ' + d.getFullYear();
+}
+
+async function loadRangeData(dateKeys) {
+  const merged = {};
+  for (const key of dateKeys) {
+    const { tracking } = await loadDayData(key);
+    for (const [domain, ms] of Object.entries(tracking)) {
+      merged[domain] = (merged[domain] || 0) + ms;
+    }
+  }
+  return { tracking: merged };
+}
+
+function renderStats(allTracking, filteredTracking) {
   const totalTimeEl = document.getElementById('totalTime');
   const siteCountEl = document.getElementById('siteCount');
   const topSiteEl = document.getElementById('topSite');
 
-  const entries = Object.entries(tracking);
-  if (entries.length === 0) {
-    totalTimeEl.textContent = '0m';
-    siteCountEl.textContent = '0';
+  const allEntries = Object.entries(allTracking);
+  const filteredEntries = Object.entries(filteredTracking);
+
+  const totalMs = allEntries.reduce((sum, [, ms]) => sum + ms, 0);
+  totalTimeEl.textContent = totalMs > 0 ? formatDuration(totalMs) : '0m';
+  siteCountEl.textContent = filteredEntries.length.toString();
+
+  if (filteredEntries.length > 0) {
+    filteredEntries.sort((a, b) => b[1] - a[1]);
+    topSiteEl.textContent = filteredEntries[0][0];
+  } else {
     topSiteEl.textContent = '--';
-    return;
   }
-
-  const totalMs = entries.reduce((sum, [, ms]) => sum + ms, 0);
-  totalTimeEl.textContent = formatDuration(totalMs);
-  siteCountEl.textContent = entries.length.toString();
-
-  entries.sort((a, b) => b[1] - a[1]);
-  topSiteEl.textContent = entries[0][0];
 }
 
 function renderBarChart(tracking) {
@@ -113,12 +233,86 @@ function renderBarChart(tracking) {
     time.className = 'bar-time';
     time.textContent = formatDuration(ms);
 
+    const hideBtn = document.createElement('button');
+    hideBtn.className = 'bar-hide';
+    hideBtn.textContent = '×';
+    hideBtn.title = 'Hide this site';
+    hideBtn.addEventListener('click', async () => {
+      hiddenDomains.push(domain);
+      await saveHiddenDomains();
+      renderView(currentDate);
+    });
+
     track.appendChild(fill);
     row.appendChild(label);
     row.appendChild(track);
     row.appendChild(time);
+    row.appendChild(hideBtn);
     container.appendChild(row);
   });
+}
+
+function renderHiddenDomains() {
+  const container = document.getElementById('hiddenDomains');
+  while (container.firstChild) container.removeChild(container.firstChild);
+
+  // Manual add input
+  const addRow = document.createElement('div');
+  addRow.className = 'hidden-add-row';
+
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.placeholder = 'Add domain to hide...';
+  input.className = 'hidden-add-input';
+
+  const addBtn = document.createElement('button');
+  addBtn.textContent = 'Hide';
+  addBtn.className = 'hidden-add-btn';
+
+  async function addToHidden() {
+    const domain = input.value.trim().toLowerCase().replace(/^https?:\/\//, '').split('/')[0].replace(/^www\./, '');
+    if (!domain || hiddenDomains.includes(domain)) return;
+    hiddenDomains.push(domain);
+    await saveHiddenDomains();
+    renderView(currentDate);
+  }
+
+  addBtn.addEventListener('click', addToHidden);
+  input.addEventListener('keydown', (e) => { if (e.key === 'Enter') addToHidden(); });
+
+  addRow.appendChild(input);
+  addRow.appendChild(addBtn);
+  container.appendChild(addRow);
+
+  // Tags for currently hidden domains
+  if (hiddenDomains.length > 0) {
+    const tagRow = document.createElement('div');
+    tagRow.className = 'hidden-tag-row';
+
+    const label = document.createElement('span');
+    label.className = 'hidden-label';
+    label.textContent = 'Hidden: ';
+    tagRow.appendChild(label);
+
+    hiddenDomains.forEach(domain => {
+      const tag = document.createElement('span');
+      tag.className = 'hidden-tag';
+      tag.textContent = domain;
+
+      const removeBtn = document.createElement('button');
+      removeBtn.textContent = '×';
+      removeBtn.addEventListener('click', async () => {
+        hiddenDomains = hiddenDomains.filter(d => d !== domain);
+        await saveHiddenDomains();
+        renderView(currentDate);
+      });
+
+      tag.appendChild(removeBtn);
+      tagRow.appendChild(tag);
+    });
+
+    container.appendChild(tagRow);
+  }
 }
 
 function renderTimeline(timeline) {
@@ -128,6 +322,12 @@ function renderTimeline(timeline) {
   }
 
   if (timeline.length === 0) return;
+
+  // DEBUG: log timeline data
+  console.log('[Timeline DEBUG] entries:', timeline.length);
+  timeline.forEach((e, i) => {
+    console.log(`[Timeline DEBUG] #${i}: domain=${e.domain}, start=${e.start}, end=${e.end}, duration=${e.end - e.start}ms, startType=${typeof e.start}, endType=${typeof e.end}`);
+  });
 
   // Build list of unique domains for consistent coloring
   const domainSet = [];
@@ -162,14 +362,20 @@ function renderTimeline(timeline) {
   tooltip.className = 'timeline-tooltip';
   bar.appendChild(tooltip);
 
-  timeline.forEach(entry => {
+  console.log('[Timeline DEBUG] dayStart:', dayStart.getTime(), 'dayMs:', dayMs);
+
+  timeline.forEach((entry, idx) => {
     const startOffset = entry.start - dayStart.getTime();
     const duration = entry.end - entry.start;
+    const leftPct = (startOffset / dayMs) * 100;
+    const widthPct = Math.max((duration / dayMs) * 100, 0.4);
+
+    console.log(`[Timeline DEBUG] block#${idx}: left=${leftPct.toFixed(2)}%, width=${widthPct.toFixed(4)}%, bg=${getDomainColor(entry.domain, domainSet)}`);
 
     const block = document.createElement('div');
     block.className = 'timeline-block';
-    block.style.left = ((startOffset / dayMs) * 100) + '%';
-    block.style.width = Math.max((duration / dayMs) * 100, 0.1) + '%';
+    block.style.left = leftPct + '%';
+    block.style.width = widthPct + '%';
     block.style.background = getDomainColor(entry.domain, domainSet);
 
     block.addEventListener('mouseenter', (e) => {
@@ -207,41 +413,93 @@ function renderTimeline(timeline) {
   container.appendChild(legend);
 }
 
-async function renderDay(date) {
-  const dateKey = formatDateKey(date);
-  datePicker.value = dateKey;
+async function renderView(date) {
+  await loadHiddenDomains();
 
-  const { tracking, timeline } = await loadDayData(dateKey);
-  renderStats(tracking);
-  renderBarChart(tracking);
-  renderTimeline(timeline);
+  const dateKeys = getDateRange(date, viewMode);
+  const rangeText = formatRangeLabel(dateKeys, viewMode);
+
+  // Update date picker / range label visibility
+  if (viewMode === 'day') {
+    datePicker.style.display = '';
+    dateRangeLabel.style.display = 'none';
+    datePicker.value = formatDateKey(date);
+  } else {
+    datePicker.style.display = 'none';
+    dateRangeLabel.style.display = '';
+    dateRangeLabel.textContent = rangeText;
+  }
+
+  let tracking, timeline;
+  if (viewMode === 'day') {
+    const data = await loadDayData(dateKeys[0]);
+    tracking = data.tracking;
+    timeline = data.timeline;
+  } else {
+    const data = await loadRangeData(dateKeys);
+    tracking = data.tracking;
+    timeline = [];
+  }
+
+  const filteredTracking = filterTracking(tracking);
+  const filteredTimeline = filterTimeline(timeline).filter(e => (e.end - e.start) >= TIMELINE_MIN_DURATION);
+
+  renderStats(tracking, filteredTracking);
+  renderBarChart(filteredTracking);
+  renderTimeline(filteredTimeline);
+  renderHiddenDomains();
+
+  // Hide timeline section for multi-day views
+  timelineSection.style.display = viewMode === 'day' ? '' : 'none';
 }
 
 // Date navigation
 function changeDate(delta) {
-  currentDate.setDate(currentDate.getDate() + delta);
-  renderDay(currentDate);
+  if (viewMode === 'month') {
+    currentDate.setMonth(currentDate.getMonth() + delta);
+  } else if (viewMode === 'week') {
+    currentDate.setDate(currentDate.getDate() + delta * 7);
+  } else {
+    currentDate.setDate(currentDate.getDate() + delta);
+  }
+  renderView(currentDate);
 }
 
 prevDayBtn.addEventListener('click', () => changeDate(-1));
 nextDayBtn.addEventListener('click', () => changeDate(1));
 todayBtn.addEventListener('click', () => {
   currentDate = new Date();
-  renderDay(currentDate);
+  renderView(currentDate);
 });
 datePicker.addEventListener('change', () => {
   currentDate = new Date(datePicker.value + 'T00:00:00');
-  renderDay(currentDate);
+  renderView(currentDate);
 });
 
-// ==================== Sync ====================
+// View toggle
+document.querySelectorAll('.view-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.view-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    viewMode = btn.dataset.view;
+    renderView(currentDate);
+  });
+});
+
+// ==================== Sync & Device Filter ====================
 
 const syncBtn = document.getElementById('syncBtn');
 const settingsBtn = document.getElementById('settingsBtn');
 const syncStatus = document.getElementById('syncStatus');
 
-settingsBtn.addEventListener('click', () => {
-  chrome.tabs.create({ url: 'settings.html' });
+settingsBtn.addEventListener('click', async () => {
+  const tabs = await chrome.tabs.query({ url: chrome.runtime.getURL('settings.html') });
+  if (tabs.length > 0) {
+    await chrome.tabs.update(tabs[0].id, { active: true });
+    await chrome.windows.update(tabs[0].windowId, { focused: true });
+  } else {
+    chrome.tabs.update({ url: 'settings.html' });
+  }
 });
 
 function showSyncStatus(msg, isError) {
@@ -250,112 +508,57 @@ function showSyncStatus(msg, isError) {
   if (!isError) setTimeout(() => { syncStatus.textContent = ''; }, 3000);
 }
 
-async function getAllTrackingData() {
-  const all = await chrome.storage.local.get(null);
-  const trackingData = {};
-  for (const [key, value] of Object.entries(all)) {
-    if (key.startsWith('tracking_')) {
-      trackingData[key] = value;
-    }
+async function populateDeviceFilter() {
+  const data = await chrome.storage.local.get(['knownDevices', 'deviceName']);
+  const knownDevices = data.knownDevices || [];
+  const currentDevice = data.deviceName || 'Default';
+
+  // Preserve current selection
+  const currentValue = deviceFilter.value;
+
+  // Clear dynamic options (keep "This Device" and "All Devices")
+  while (deviceFilter.options.length > 2) {
+    deviceFilter.remove(2);
   }
-  return trackingData;
+
+  // Update "This Device" label
+  deviceFilter.options[0].textContent = currentDevice + ' (this)';
+
+  // Add other devices
+  knownDevices.forEach(device => {
+    const opt = document.createElement('option');
+    opt.value = 'remote_' + device;
+    opt.textContent = device;
+    deviceFilter.appendChild(opt);
+  });
+
+  // Restore selection if still valid
+  if ([...deviceFilter.options].some(o => o.value === currentValue)) {
+    deviceFilter.value = currentValue;
+  }
 }
 
-function mergeTrackingData(local, remote) {
-  const merged = { ...local };
-  for (const [key, remoteDomains] of Object.entries(remote)) {
-    if (!merged[key]) {
-      merged[key] = remoteDomains;
-    } else {
-      // For each domain, keep the larger value
-      for (const [domain, ms] of Object.entries(remoteDomains)) {
-        merged[key][domain] = Math.max(merged[key][domain] || 0, ms);
-      }
-    }
-  }
-  return merged;
-}
+deviceFilter.addEventListener('change', () => {
+  renderView(currentDate);
+});
 
-async function syncData() {
-  const settings = await chrome.storage.local.get(['githubToken', 'gistId']);
-  const token = settings.githubToken;
-
-  if (!token) {
-    showSyncStatus('No GitHub token. Go to Settings first.', true);
-    return;
-  }
-
+syncBtn.addEventListener('click', async () => {
   syncBtn.disabled = true;
   syncBtn.textContent = 'Syncing...';
 
-  try {
-    const localData = await getAllTrackingData();
-    let gistId = settings.gistId;
+  const result = await chrome.runtime.sendMessage({ action: 'sync' });
 
-    if (gistId) {
-      // Download remote data and merge
-      const getRes = await fetch('https://api.github.com/gists/' + gistId, {
-        headers: { 'Authorization': 'token ' + token }
-      });
-
-      if (!getRes.ok) throw new Error('Failed to fetch gist: ' + getRes.status);
-
-      const gist = await getRes.json();
-      const remoteContent = gist.files['focustab_data.json'];
-      const remoteData = remoteContent ? JSON.parse(remoteContent.content) : {};
-
-      // Merge
-      const merged = mergeTrackingData(localData, remoteData);
-
-      // Save merged data locally
-      await chrome.storage.local.set(merged);
-
-      // Upload merged data
-      const updateRes = await fetch('https://api.github.com/gists/' + gistId, {
-        method: 'PATCH',
-        headers: {
-          'Authorization': 'token ' + token,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          files: { 'focustab_data.json': { content: JSON.stringify(merged) } }
-        })
-      });
-
-      if (!updateRes.ok) throw new Error('Failed to update gist: ' + updateRes.status);
-    } else {
-      // Create new gist
-      const createRes = await fetch('https://api.github.com/gists', {
-        method: 'POST',
-        headers: {
-          'Authorization': 'token ' + token,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          description: 'FocusTab Sync Data',
-          public: false,
-          files: { 'focustab_data.json': { content: JSON.stringify(localData) } }
-        })
-      });
-
-      if (!createRes.ok) throw new Error('Failed to create gist: ' + createRes.status);
-
-      const newGist = await createRes.json();
-      gistId = newGist.id;
-      await chrome.storage.local.set({ gistId });
-    }
-
+  if (result.success) {
     showSyncStatus('Synced!', false);
-    renderDay(currentDate);
-  } catch (err) {
-    showSyncStatus('Sync failed: ' + err.message, true);
-  } finally {
-    syncBtn.disabled = false;
-    syncBtn.textContent = 'Sync';
+    await populateDeviceFilter();
+    renderView(currentDate);
+  } else {
+    showSyncStatus(result.error || 'Sync failed', true);
   }
-}
 
-syncBtn.addEventListener('click', syncData);
+  syncBtn.disabled = false;
+  syncBtn.textContent = 'Sync';
+});
 
 // Initial render
-renderDay(currentDate);
+populateDeviceFilter().then(() => renderView(currentDate));

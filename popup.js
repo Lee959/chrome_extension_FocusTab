@@ -43,7 +43,8 @@ function formatTimeLeft(ms) {
 }
 
 // Render the domain list
-function renderDomainList(domains, pendingChanges) {
+async function renderDomainList(domains, pendingChanges) {
+  const allTabs = await chrome.tabs.query({});
   while (domainList.firstChild) {
     domainList.removeChild(domainList.firstChild);
   }
@@ -130,6 +131,27 @@ function renderDomainList(domains, pendingChanges) {
     controls.appendChild(plusBtn);
     controls.appendChild(cooldownSpan);
     controls.appendChild(removeBtn);
+
+    // Show "Close N" button if too many tabs are open
+    const matchingTabs = allTabs.filter(t => {
+      try {
+        const h = new URL(t.url).hostname;
+        return h === entry.domain || h.endsWith('.' + entry.domain);
+      } catch { return false; }
+    });
+    if (matchingTabs.length > entry.maxTabs) {
+      const excess = matchingTabs.length - entry.maxTabs;
+      const closeBtn = document.createElement('button');
+      closeBtn.className = 'close-excess-btn';
+      closeBtn.textContent = 'Close ' + excess;
+      closeBtn.title = 'Close ' + excess + ' excess tab' + (excess > 1 ? 's' : '');
+      closeBtn.addEventListener('click', async () => {
+        const toClose = matchingTabs.slice(0, excess);
+        await chrome.tabs.remove(toClose.map(t => t.id));
+        loadSettings();
+      });
+      controls.appendChild(closeBtn);
+    }
 
     li.appendChild(nameSpan);
     li.appendChild(controls);
@@ -278,9 +300,15 @@ domainInput.addEventListener('keydown', (e) => {
   if (e.key === 'Enter') addDomain();
 });
 
-// Dashboard button
-document.getElementById('dashboardBtn').addEventListener('click', () => {
-  chrome.tabs.create({ url: 'dashboard.html' });
+// Dashboard button — reuse existing tab if open
+document.getElementById('dashboardBtn').addEventListener('click', async () => {
+  const tabs = await chrome.tabs.query({ url: chrome.runtime.getURL('dashboard.html') });
+  if (tabs.length > 0) {
+    await chrome.tabs.update(tabs[0].id, { active: true });
+    await chrome.windows.update(tabs[0].windowId, { focused: true });
+  } else {
+    chrome.tabs.create({ url: 'dashboard.html' });
+  }
 });
 
 // Load on popup open

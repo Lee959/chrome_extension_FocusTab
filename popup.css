@@ -267,6 +267,23 @@ h1 {
   color: #ff6b6b;
 }
 
+.close-excess-btn {
+  padding: 2px 8px;
+  background: #5c1a1a;
+  color: #ff6b6b;
+  border: 1px solid #e74c3c;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 10px;
+  white-space: nowrap;
+  margin-left: 4px;
+}
+
+.close-excess-btn:hover {
+  background: #e74c3c;
+  color: #fff;
+}
+
 .empty-msg {
   text-align: center;
   color: #555;
