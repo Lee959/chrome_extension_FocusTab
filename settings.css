@@ -1,0 +1,147 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  background: #0f0f1a;
+  color: #e0e0e0;
+  min-height: 100vh;
+}
+
+.container {
+  max-width: 600px;
+  margin: 0 auto;
+  padding: 32px 24px;
+}
+
+h1 {
+  font-size: 24px;
+  color: #fff;
+  margin-bottom: 24px;
+}
+
+h2 {
+  font-size: 16px;
+  color: #fff;
+  margin-bottom: 8px;
+}
+
+.section {
+  background: #1a1a2e;
+  border-radius: 10px;
+  padding: 20px;
+}
+
+.desc {
+  font-size: 13px;
+  color: #888;
+  margin-bottom: 16px;
+}
+
+.steps {
+  margin-bottom: 16px;
+}
+
+.step {
+  font-size: 13px;
+  color: #aaa;
+  margin-bottom: 6px;
+}
+
+.step a {
+  color: #8ab4f8;
+  text-decoration: none;
+}
+
+.step a:hover {
+  text-decoration: underline;
+}
+
+.field {
+  margin-bottom: 14px;
+}
+
+.field label {
+  display: block;
+  font-size: 12px;
+  color: #aaa;
+  margin-bottom: 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.optional {
+  text-transform: none;
+  letter-spacing: 0;
+  color: #666;
+}
+
+.field input {
+  width: 100%;
+  padding: 10px 12px;
+  background: #0f0f1a;
+  border: 1px solid #333;
+  border-radius: 6px;
+  color: #e0e0e0;
+  font-size: 13px;
+  font-family: monospace;
+  outline: none;
+}
+
+.field input:focus {
+  border-color: #4CAF50;
+}
+
+.input-row {
+  display: flex;
+  gap: 8px;
+}
+
+.input-row input {
+  flex: 1;
+}
+
+.input-row button {
+  padding: 8px 12px;
+  background: #0f3460;
+  color: #8ab4f8;
+  border: 1px solid #333;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.input-row button:hover {
+  background: #1a5276;
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.primary {
+  padding: 10px 24px;
+  background: #4CAF50;
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.primary:hover {
+  background: #45a049;
+}
+
+.status {
+  font-size: 13px;
+  color: #4CAF50;
+}

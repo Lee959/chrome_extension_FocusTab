@@ -273,3 +273,23 @@ h1 {
   font-size: 12px;
   padding: 12px 0;
 }
+
+/* Dashboard button */
+.dashboard-btn {
+  width: 100%;
+  padding: 9px;
+  margin-top: 10px;
+  background: #0f3460;
+  color: #8ab4f8;
+  border: 1px solid #333;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.dashboard-btn:hover {
+  background: #1a5276;
+  border-color: #4CAF50;
+  color: #fff;
+}

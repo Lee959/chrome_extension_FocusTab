@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>FocusTab Settings</title>
+  <link rel="stylesheet" href="settings.css">
+</head>
+<body>
+  <div class="container">
+    <h1>FocusTab Settings</h1>
+
+    <div class="section">
+      <h2>GitHub Gist Sync</h2>
+      <p class="desc">Sync your tracking data between computers using a private GitHub Gist.</p>
+
+      <div class="steps">
+        <p class="step">1. Go to <a id="tokenLink" href="#">GitHub Token Settings</a> and create a token with only the <strong>gist</strong> scope.</p>
+        <p class="step">2. Paste the token below:</p>
+      </div>
+
+      <div class="field">
+        <label>GitHub Token</label>
+        <div class="input-row">
+          <input type="password" id="tokenInput" placeholder="ghp_xxxxxxxxxxxx">
+          <button id="toggleToken">Show</button>
+        </div>
+      </div>
+
+      <div class="field">
+        <label>Gist ID <span class="optional">(auto-created on first sync, or paste from another computer)</span></label>
+        <input type="text" id="gistIdInput" placeholder="Auto-generated on first sync">
+      </div>
+
+      <div class="actions">
+        <button id="saveBtn" class="primary">Save</button>
+        <span id="status" class="status"></span>
+      </div>
+    </div>
+  </div>
+
+  <script src="settings.js"></script>
+</body>
+</html>

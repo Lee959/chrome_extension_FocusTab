@@ -2,8 +2,9 @@
   "manifest_version": 3,
   "name": "FocusTab",
   "version": "1.0",
-  "description": "ADHD-friendly tab limiter. Restrict duplicate tabs per site with a cooldown to keep you focused.",
-  "permissions": ["tabs", "storage"],
+  "description": "Tab limiter and time tracker. Restrict duplicate tabs per site with a cooldown to keep you focused.",
+  "permissions": ["tabs", "storage", "idle"],
+  "host_permissions": ["https://api.github.com/*"],
   "background": {
     "service_worker": "background.js"
   },

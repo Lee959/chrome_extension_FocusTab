@@ -278,5 +278,10 @@ domainInput.addEventListener('keydown', (e) => {
   if (e.key === 'Enter') addDomain();
 });
 
+// Dashboard button
+document.getElementById('dashboardBtn').addEventListener('click', () => {
+  chrome.tabs.create({ url: 'dashboard.html' });
+});
+
 // Load on popup open
 loadSettings();
