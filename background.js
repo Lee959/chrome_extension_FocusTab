@@ -262,7 +262,7 @@ async function cleanOldData() {
 
 // ==================== Sync ====================
 
-const AUTO_SYNC_INTERVAL = 30 * 60 * 1000; // 30 minutes
+const AUTO_SYNC_INTERVAL = 3; // minutes (for chrome.alarms)
 
 function getAllTrackingData(allData) {
   const trackingData = {};
@@ -433,8 +433,11 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
 });
 
-// Auto-sync on timer
-setInterval(autoSync, AUTO_SYNC_INTERVAL);
+// Auto-sync on timer (chrome.alarms survives service worker sleep)
+chrome.alarms.create('autoSync', { periodInMinutes: AUTO_SYNC_INTERVAL });
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name === 'autoSync') autoSync();
+});
 
 // ==================== Startup ====================
 

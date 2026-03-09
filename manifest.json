@@ -3,7 +3,7 @@
   "name": "FocusTab",
   "version": "1.0",
   "description": "Tab limiter and time tracker. Restrict duplicate tabs per site with a cooldown to keep you focused.",
-  "permissions": ["tabs", "storage", "idle"],
+  "permissions": ["tabs", "storage", "idle", "alarms"],
   "host_permissions": ["https://api.github.com/*"],
   "background": {
     "service_worker": "background.js"
